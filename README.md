@@ -8,3 +8,4 @@ An interactive story made with Adobe Animate (HTML5 Canvas / CreateJS).
 Credits
 - Background music: "Sleep Talking" by Kilua Boy (CC0), via OpenGameArt.
 - Libraries: CreateJS, three.js, MindAR (loaded from CDNs).
+- Release sound: "Magic Words + Healing Sound Effect" (health_restore) by Spring Spring (CC0), via OpenGameArt. The star "tink" is synthesized with Web Audio.

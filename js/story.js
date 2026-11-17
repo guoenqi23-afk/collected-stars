@@ -139,30 +139,75 @@
     return t;
   }
 
-  // Simple HTML audio wrapper; missing files are ignored silently.
+  // Audio: background music via <audio>, effects via Web Audio.
+  // Phones only allow sound after a tap, so start() must be called from a tap;
+  // after that, effects can play at any time (e.g. while stars fall on their own).
+  // Missing files are ignored silently.
+  var PENTATONIC = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21];   // semitones above G5
   function makeAudio(files) {
-    var api = { unlocked: false, bgm: null, muted: false };
-    function el(src, vol) {
-      if (!src) return null;
-      var a = new Audio(src); a.preload = 'auto'; a.volume = vol; return a;
+    var api = { unlocked: false, bgm: null, muted: false, ctx: null };
+    var master = null, buffers = {}, last = {};
+
+    if (files.bgm) {
+      api.bgm = new Audio(files.bgm);
+      api.bgm.preload = 'auto'; api.bgm.loop = true; api.bgm.volume = 0.55;
     }
-    api.bgm = el(files.bgm, 0.55);
-    if (api.bgm) api.bgm.loop = true;
-    var last = {};
+
+    function load(name) {
+      if (!files[name] || buffers[name]) return;
+      buffers[name] = 'loading';
+      fetch(files[name]).then(function (r) { return r.arrayBuffer(); })
+        .then(function (ab) {
+          return new Promise(function (res, rej) { api.ctx.decodeAudioData(ab, res, rej); });
+        })
+        .then(function (buf) { buffers[name] = buf; }, function () { delete buffers[name]; });
+    }
+
+    function ready() { return api.ctx && api.ctx.state === 'running' && !api.muted; }
+
+    // file based effect
     api.sfx = function (name, vol, minGap) {
-      if (api.muted || !files[name]) return;
+      if (!ready() || !(buffers[name] instanceof AudioBuffer)) return;
       var now = Date.now();
       if (last[name] && now - last[name] < (minGap || 0)) return;
       last[name] = now;
-      var a = el(files[name], vol == null ? 0.6 : vol);
-      var p = a.play(); if (p && p.catch) p.catch(function () {});
+      var src = api.ctx.createBufferSource(), g = api.ctx.createGain();
+      src.buffer = buffers[name]; g.gain.value = vol == null ? 0.6 : vol;
+      src.connect(g); g.connect(master); src.start();
     };
+
+    // synthesized glass "tink"; level 0..1 picks a note on a rising pentatonic scale
+    api.chime = function (level, vol) {
+      if (!ready()) return;
+      var ctx = api.ctx, t = ctx.currentTime;
+      var idx = Math.round(clamp01(level) * (PENTATONIC.length - 1));
+      var f = 783.99 * Math.pow(2, PENTATONIC[idx] / 12);
+      var env = ctx.createGain();
+      env.gain.setValueAtTime(0.0001, t);
+      env.gain.exponentialRampToValueAtTime(vol == null ? 0.16 : vol, t + 0.008);
+      env.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+      env.connect(master);
+      [[1, 1], [2.01, 0.35], [3.0, 0.12]].forEach(function (p) {
+        var o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = f * p[0]; g.gain.value = p[1];
+        o.connect(g); g.connect(env); o.start(t); o.stop(t + 1.5);
+      });
+    };
+
     api.start = function () {
       api.unlocked = true;
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC && !api.ctx) {
+        api.ctx = new AC();
+        master = api.ctx.createGain(); master.connect(api.ctx.destination);
+        load('release'); load('collect');
+      }
+      if (api.ctx && api.ctx.state !== 'running') api.ctx.resume();
       if (api.bgm && !api.muted) { var p = api.bgm.play(); if (p && p.catch) p.catch(function () {}); }
     };
     api.setMuted = function (m) {
       api.muted = m;
+      if (master) master.gain.value = m ? 0 : 1;
       if (!api.bgm) return;
       if (m) api.bgm.pause(); else if (api.unlocked) api.bgm.play();
     };
@@ -451,7 +496,9 @@
             S.collected++;
             ring(JAR.mouthX, JAR.mouthY + 30);
             burst(JAR.mouthX, JAR.mouthY + 30, 10, 90, dotWarm);
-            audio.sfx('collect', 0.35, 120);
+            // a file "collect" sound wins if provided, otherwise a synthesized tink
+            if (opts.audio && opts.audio.collect) audio.sfx('collect', 0.35, 120);
+            else audio.chime(S.collected / stars.length);
           }
         } else if (s.state === 'rising') {
           s.t += dt;
@@ -466,6 +513,7 @@
               sprite: Math.random() < 0.35 ? dotPink : dotWarm });
           if (v >= 1) {
             s.state = 'sky'; S.released++;
+            audio.chime(1 - S.released / stars.length, 0.07);   // soft, falling notes
             burst(s.home.x, s.home.y, 8, 70, dotWarm);
             ring(s.home.x, s.home.y);
           }

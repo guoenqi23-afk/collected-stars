@@ -74,8 +74,8 @@
         poster: new createjs.Bitmap(img),
         audio: {
           bgm: 'assets/audio/SleepTalking.wav',
-          collect: null,   // TODO: star chime (added at the end)
-          release: null    // TODO: harp sweep (added at the end)
+          collect: null,   // null = synthesized glass chime
+          release: 'assets/audio/release.wav'
         }
       });
       window.story = story; window.stage = stage;
