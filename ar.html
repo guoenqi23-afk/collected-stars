@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#160f3a">
+<title>Stars AR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;1,600&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: #fff4e0; --gold: #ffd9a0; --bg: #160f3a; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg);
+    font-family: "Cormorant Garamond", Georgia, serif; color: var(--ink);
+    -webkit-tap-highlight-color: transparent; }
+  #ar { position: fixed; inset: 0; }
+  .screen { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; padding: 24px; box-sizing: border-box;
+    background: radial-gradient(ellipse at 50% 60%, #2a1d63 0%, #160f3a 60%, #0b0720 100%); }
+  .screen h1 { font-style: italic; font-weight: 600; font-size: 40px; line-height: 1.1; margin: 0 0 18px;
+    text-shadow: 0 0 18px rgba(255,210,150,.6); }
+  .screen p { font-size: 20px; line-height: 1.4; margin: 0 0 28px; max-width: 320px; color: #e9ddff; }
+  .btn { font: 600 22px "Cormorant Garamond", Georgia, serif; color: var(--ink); cursor: pointer;
+    padding: 12px 34px; border-radius: 40px; border: 1px solid rgba(255,220,170,.75);
+    background: rgba(255,210,150,.12); box-shadow: 0 0 22px rgba(255,210,150,.25); }
+  .link { margin-top: 22px; color: var(--gold); font-size: 18px; }
+  #tip { position: fixed; left: 0; right: 0; bottom: max(22px, env(safe-area-inset-bottom)); z-index: 5;
+    text-align: center; font-size: 19px; color: var(--gold); text-shadow: 0 0 10px #000; display: none;
+    pointer-events: none; }
+  #preview { position: fixed; inset: 0; display: none; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/",
+    "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
+  }
+}
+</script>
+<script src="https://code.createjs.com/1.0.0/createjs.min.js"></script>
+<script src="js/story.js"></script>
+</head>
+<body>
+<div id="ar"></div>
+<canvas id="preview"></canvas>
+<div id="tip"></div>
+
+<div class="screen" id="start">
+  <h1>The Girl Who<br>Collected Stars</h1>
+  <p>Point your camera at the poster and watch the stars come to life.</p>
+  <button class="btn" id="go">✦ Start AR ✦</button>
+  <a class="link" href="index.html">No poster nearby? Watch the story</a>
+</div>
+
+<div class="screen" id="fail" style="display:none">
+  <h1>Camera unavailable</h1>
+  <p id="failMsg">We couldn't open the camera. You can still enjoy the interactive story.</p>
+  <a class="btn" href="index.html" style="text-decoration:none">Open the story</a>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { MindARThree } from 'mindar-image-three';
+
+const AUDIO = { bgm: 'assets/audio/SleepTalking.wav', collect: null, release: null };
+const L = StarStory.LAYOUTS.ar;               // 2048 x 1361, same as the artwork
+const TEX_SCALE = 0.5;                        // render the overlay at 1024 x 681
+const tip = document.getElementById('tip');
+const params = new URLSearchParams(location.search);
+
+function fontsReady() {
+  const f = document.fonts ? Promise.all([
+    document.fonts.load('italic 600 40px "Cormorant Garamond"'),
+    document.fonts.load('600 40px "Cormorant Garamond"')]).catch(() => {}) : Promise.resolve();
+  return Promise.race([f, new Promise(r => setTimeout(r, 2500))]);
+}
+
+// Story drawn onto an offscreen canvas that becomes the AR texture.
+function makeOverlay(canvas, withPoster) {
+  const stage = new createjs.Stage(canvas);
+  const root = new createjs.Container();
+  root.scaleX = root.scaleY = canvas.width / L.W;
+  stage.addChild(root);
+  const opts = { stage, layout: 'ar', audio: AUDIO, hintText: 'Tap the screen to release the stars.' };
+  if (withPoster) opts.poster = withPoster;
+  const story = StarStory.init(root, opts);
+  window.story = story; window.stage = stage;
+  return story;
+}
+
+// Tap anywhere: release the stars when asked, replay at the end.
+function bindTaps(story) {
+  window.addEventListener('pointerup', () => {
+    const p = story.state.phase;
+    if (p === 'waitTap') story.release();
+    else if (p === 'end') story.replay();
+  });
+}
+
+// ?preview=1 : no camera, draws the overlay on top of poster.jpg to check alignment.
+async function startPreview() {
+  document.getElementById('start').style.display = 'none';
+  const img = new Image();
+  await new Promise(r => { img.onload = r; img.src = 'assets/img/poster.jpg'; });
+  const c = document.getElementById('preview');
+  c.style.display = 'block';
+  const fit = () => {
+    const s = Math.min(innerWidth / L.W, innerHeight / L.H);
+    c.width = Math.round(L.W * s); c.height = Math.round(L.H * s);
+    c.style.left = ((innerWidth - c.width) / 2) + 'px'; c.style.top = ((innerHeight - c.height) / 2) + 'px';
+  };
+  fit();
+  const story = makeOverlay(c, new createjs.Bitmap(img));
+  bindTaps(story);
+  story.begin();
+}
+
+async function startAR() {
+  const cvs = document.createElement('canvas');
+  cvs.width = Math.round(L.W * TEX_SCALE); cvs.height = Math.round(L.H * TEX_SCALE);
+  const story = makeOverlay(cvs, null);
+  story.audio.start();          // still inside the tap, so phones allow the music
+  bindTaps(story);
+
+  const mindar = new MindARThree({
+    container: document.getElementById('ar'),
+    imageTargetSrc: 'assets/ar/targets.mind',
+    filterMinCF: 0.0001, filterBeta: 0.001       // smoother, less jitter
+  });
+  const { renderer, scene, camera } = mindar;
+
+  const tex = new THREE.CanvasTexture(cvs);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, L.H / L.W),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  const anchor = mindar.addAnchor(0);
+  anchor.group.add(plane);
+
+  anchor.onTargetFound = () => {
+    tip.style.display = 'none';
+    if (story.state.phase === 'intro') story.begin();
+  };
+  anchor.onTargetLost = () => {
+    tip.textContent = 'Point at the poster again ✦'; tip.style.display = 'block';
+  };
+
+  await mindar.start();
+  tip.textContent = 'Find the poster with your camera ✦'; tip.style.display = 'block';
+  renderer.setAnimationLoop(() => {
+    tex.needsUpdate = true;
+    renderer.render(scene, camera);
+  });
+}
+
+await fontsReady();
+
+if (params.get('preview')) {
+  startPreview();
+} else {
+  document.getElementById('go').addEventListener('click', async () => {
+    document.getElementById('start').style.display = 'none';
+    try {
+      await startAR();
+    } catch (e) {
+      console.error(e);
+      document.getElementById('failMsg').textContent =
+        "We couldn't open the camera. Please allow camera access (or open this page in Safari / Chrome), " +
+        'or enjoy the interactive story instead.';
+      document.getElementById('fail').style.display = 'flex';
+    }
+  });
+}
+</script>
+</body>
+</html>

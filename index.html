@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#160f3a">
+<title>The Girl Who Collected Stars</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;1,600&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #120c30;
+    background: radial-gradient(ellipse at 55% 60%, #2a1d63 0%, #160f3a 55%, #0b0720 100%);
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  canvas { display: block; position: absolute; left: 0; top: 0; }
+  #mute { position: fixed; right: 14px; top: 14px; z-index: 5; width: 42px; height: 42px;
+    border-radius: 50%; border: 1px solid rgba(255,220,170,.55); background: rgba(30,20,70,.45);
+    color: #ffe9c4; font-size: 18px; cursor: pointer; display: none; }
+  #arlink { position: fixed; left: 14px; top: 14px; z-index: 5; height: 42px; line-height: 42px;
+    padding: 0 16px; border-radius: 21px; border: 1px solid rgba(255,220,170,.55);
+    background: rgba(30,20,70,.45); color: #ffe9c4; text-decoration: none;
+    font: 600 17px "Cormorant Garamond", Georgia, serif; display: none; }
+  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #ffd9a0; font: italic 600 22px "Cormorant Garamond", Georgia, serif; letter-spacing: .05em; }
+</style>
+</head>
+<body>
+<div id="loading">✦ loading the stars… ✦</div>
+<canvas id="c"></canvas>
+<button id="mute" aria-label="Mute">♪</button>
+<a id="arlink" href="ar.html">✦ AR mode</a>
+
+<script src="https://code.createjs.com/1.0.0/createjs.min.js"></script>
+<script src="js/story.js"></script>
+<script>
+(function () {
+  var cvs = document.getElementById('c');
+  var stage = new createjs.Stage(cvs);
+  createjs.Touch.enable(stage);
+  stage.enableMouseOver(20);
+  createjs.Ticker.timingMode = createjs.Ticker.RAF;
+
+  var root = new createjs.Container();
+  stage.addChild(root);
+
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = window.innerWidth, h = window.innerHeight;
+    cvs.width = Math.round(w * dpr); cvs.height = Math.round(h * dpr);
+    cvs.style.width = w + 'px'; cvs.style.height = h + 'px';
+    var P = StarStory.LAYOUTS.portrait, W = P.W, H = P.H;
+    // fill the height, but never crop below the safe band around the girl & jar
+    var s = Math.min(h / H, w / StarStory.SAFE_W);
+    var x;
+    if (W * s <= w) x = (w - W * s) / 2;
+    else x = Math.min(0, Math.max(w - W * s, w / 2 - P.focusX * s));
+    var y = H * s < h ? (h - H * s) / 2 : 0;
+    root.scaleX = root.scaleY = s * dpr;
+    root.x = x * dpr; root.y = y * dpr;
+    stage.update();
+  }
+
+  var img = new Image();
+  img.onload = function () {
+    var fontReady = (document.fonts && document.fonts.load)
+      ? Promise.all([document.fonts.load('italic 600 40px "Cormorant Garamond"'),
+                     document.fonts.load('600 40px "Cormorant Garamond"')]).catch(function () {})
+      : Promise.resolve();
+    var timeout = new Promise(function (r) { setTimeout(r, 2500); });
+    Promise.race([fontReady, timeout]).then(function () {
+      document.getElementById('loading').style.display = 'none';
+      var story = StarStory.init(root, {
+        stage: stage,
+        poster: new createjs.Bitmap(img),
+        audio: {
+          bgm: 'assets/audio/SleepTalking.wav',
+          collect: null,   // TODO: star chime (added at the end)
+          release: null    // TODO: harp sweep (added at the end)
+        }
+      });
+      window.story = story; window.stage = stage;
+      resize();
+      var mute = document.getElementById('mute');
+      mute.style.display = 'block';
+      // AR entry only on the start screen
+      var arlink = document.getElementById('arlink');
+      arlink.style.display = 'block';
+      var hideAr = setInterval(function () {
+        if (story.state.phase !== 'intro') { arlink.style.display = 'none'; clearInterval(hideAr); }
+      }, 300);
+      mute.onclick = function () {
+        story.audio.setMuted(!story.audio.muted);
+        mute.textContent = story.audio.muted ? '✕' : '♪';
+      };
+    });
+  };
+  img.src = 'assets/img/poster.jpg';
+  window.addEventListener('resize', resize);
+  resize();
+})();
+</script>
+</body>
+</html>
