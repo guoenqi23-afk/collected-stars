@@ -23,8 +23,10 @@
   };
 
   // Two layouts share the same story:
-  //  - portrait: phone page, artwork cropped into a 2:3 stage with extra sky on top
-  //  - ar:       transparent overlay drawn exactly on top of the printed artwork
+  //  - portrait:  phones held upright; artwork cropped into a 2:3 stage with extra sky on top
+  //  - landscape: computers / sideways phones; the full artwork, scaled to cover the screen.
+  //               Texts sit in the open sky on the right (textBox keeps stars out of it);
+  //               view.x / view.y say which point stays centred when the screen crops the art.
   var LAYOUTS = {
     portrait: {
       W: 1080, H: 1620, art: { scale: 1.05, x: -534, y: 191 },
@@ -32,11 +34,13 @@
       starBand: { x0: 240, x1: 960, y0: 340, y1: 1050 }, starGap: 105,
       text: { q: [150, 52], hint: [1236, 42], end: [140, 56], title: [170, 84], start: [1380, 38], replay: 1500 }
     },
-    ar: {
+    landscape: {
       W: 2048, H: 1361, art: { scale: 1, x: 0, y: 0 },
-      focusX: 1100, textW: 1500, background: false, intro: false, darkR: 1500,
-      starBand: { x0: 120, x1: 1940, y0: 300, y1: 1010 }, starGap: 150,
-      text: { q: [40, 78], hint: [1190, 60], end: [40, 84], title: [60, 90], start: [1200, 50], replay: 1290 }
+      focusX: 1600, textW: 760, background: false, intro: true, darkR: 1500,
+      starBand: { x0: 160, x1: 1950, y0: 250, y1: 1000 }, starGap: 140,
+      textBox: { x0: 1180, x1: 2048, y0: 180, y1: 640 },
+      view: { x: 1250, y: 640 },
+      text: { q: [225, 60], hint: [480, 46], end: [225, 64], title: [210, 92], start: [560, 46], replay: 680 }
     }
   };
 
@@ -295,6 +299,8 @@
       var gy = (hy - (POSTER.y + ART.girl.y * ps)) / (ART.girl.ry * ps * 1.05);
       if (gx * gx + gy * gy < 1) continue;
       if (Math.abs(hx - JAR.x) < JAR.hitW * 0.55 && hy > JAR.y - JAR.hitH * 0.85) continue;
+      var TB = L.textBox;   // keep stars out from under the texts
+      if (TB && hx > TB.x0 && hx < TB.x1 && hy > TB.y0 && hy < TB.y1) continue;
       var ok = true;
       for (var k = 0; k < stars.length; k++) {
         var dx = stars[k].home.x - hx, dy = stars[k].home.y - hy;
@@ -581,7 +587,7 @@
         S.collected = stars.length; S.nextIdx = stars.length; S.phase = 'dark'; S.t = 0;
       },
       release: startRelease,
-      // start without the intro overlay (AR mode starts when the poster is found)
+      // start without the intro overlay
       begin: function () {
         if (S.phase !== 'intro') return;
         intro.visible = false; audio.start(); resetStory();
