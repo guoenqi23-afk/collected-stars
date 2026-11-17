@@ -60,15 +60,17 @@
 
   var TIMING = {
     calm: 1.6,           // shot 1: calm on the moon
-    starInterval: 0.36,  // gap between falling stars
+    starInterval: 0.3,   // gap between falling stars
     fallDur: 1.9,        // flight time of one star into the jar
-    afterDark: 0.7,      // pause before the question appears
+    blackIn: 2.6,        // after the last star: the screen fades to black, only the jar glows
+    afterDark: 2.2,      // pause before the question appears (text fades in as it goes black)
     hintDelay: 1.3,      // question -> "tap the jar" hint
-    releaseInterval: 0.13,
+    blackOut: 1.8,       // after the tap: the black lifts again
+    releaseInterval: 0.1,
     riseDur: 2.3,
     endDelay: 0.8
   };
-  var STAR_COUNT = 18;
+  var STAR_COUNT = 25;
 
   // ---------------------------------------------------------------- helpers
   function rand(a, b) { return a + Math.random() * (b - a); }
@@ -250,6 +252,40 @@
       root.addChild(fade);
     }
 
+    // moon overlays (made from the artwork by tools/make_moon_mask.py, half resolution):
+    // the shade dims the moon while she keeps the stars, the glow makes it shine again
+    var moonFiles = opts.moon === false ? null :
+      (opts.moon || { shade: 'assets/img/moon_shade.png', glow: 'assets/img/moon_glow.png' });
+    var moonShade = null, moonGlow = null;
+    if (moonFiles) {
+      moonShade = new createjs.Bitmap(moonFiles.shade);
+      moonGlow = new createjs.Bitmap(moonFiles.glow);
+      moonGlow.compositeOperation = 'lighter';
+      [moonShade, moonGlow].forEach(function (b) {
+        b.x = POSTER.x; b.y = POSTER.y; b.scaleX = b.scaleY = POSTER.scale * 2;
+        b.alpha = 0; b.mouseEnabled = false;
+        root.addChild(b);
+      });
+    }
+
+    // golden lid: closes the jar when every star is inside, pops open on the tap
+    var lid = new createjs.Container();
+    (function drawLid() {
+      var body = new createjs.Shape(), g = body.graphics;
+      g.beginLinearGradientFill(['#5e4219', '#c9a253', '#fff0bd', '#d2a24c', '#5e4219'],
+        [0, 0.28, 0.45, 0.72, 1], -70, 0, 70, 0).drawRoundRect(-70, -34, 140, 32, 7);
+      g.endFill().setStrokeStyle(1.2).beginStroke('rgba(90,60,20,0.35)');
+      for (var x = -60; x <= 60; x += 10) g.moveTo(x, -31).lineTo(x, -5);
+      g.endStroke();
+      g.beginRadialGradientFill(['#fff4c8', '#e4bf6c', '#a77d35'], [0, 0.55, 1], -15, -40, 0, 0, -36, 80)
+        .drawEllipse(-70, -45, 140, 22);
+      g.beginFill('rgba(70,48,18,0.55)').drawEllipse(-72, -9, 144, 12);
+      lid.addChild(body);
+    })();
+    var LID = { x: POSTER.x + 1176 * POSTER.scale, y: POSTER.y + 614 * POSTER.scale };
+    lid.x = LID.x; lid.y = LID.y; lid.scaleX = lid.scaleY = POSTER.scale; lid.alpha = 0;
+    root.addChild(lid);
+
     var dotWarm = makeDotSprite('rgba(255,248,220,1)', 'rgba(255,220,150,0.5)');
     var dotCool = makeDotSprite('rgba(240,235,255,1)', 'rgba(190,170,255,0.45)');
     var dotPink = makeDotSprite('rgba(255,235,245,1)', 'rgba(255,170,210,0.5)');
@@ -274,6 +310,15 @@
     dark.alpha = 0;
     root.addChild(dark);
 
+    // full blackout once every star is in the jar: pure black except a soft window on the jar
+    var black = new createjs.Shape();
+    var holeR = JAR.hitW * 1.15;
+    black.graphics.beginRadialGradientFill(
+      ['rgba(0,0,0,0)', 'rgba(0,0,0,0)', 'rgba(0,0,0,0.65)', 'rgba(0,0,0,1)'], [0, 0.32, 0.62, 1],
+      JAR.x, JAR.y, 0, JAR.x, JAR.y, holeR).drawRect(0, 0, W, H);
+    black.alpha = 0;
+    root.addChild(black);
+
     var glow = centeredBitmap(makeGlowSprite(), 0.9);
     glow.x = JAR.x; glow.y = JAR.y; glow.compositeOperation = 'lighter'; glow.alpha = 0.18;
     root.addChild(glow);
@@ -289,8 +334,10 @@
     // ---- collectable stars, placed in the visible sky band
     var sprites = [makeStarSprite(0.2), makeStarSprite(1.3), makeStarSprite(2.7)];
     var stars = [];
-    var tries = 0;
-    while (stars.length < STAR_COUNT && tries++ < 4000) {
+    var tries = 0, gap = L.starGap;
+    while (stars.length < STAR_COUNT && tries++ < 12000) {
+      // crowded band: loosen the spacing a little every 1500 misses so every star finds a home
+      if (tries % 1500 === 0) gap *= 0.9;
       // the band starts below the text lines so they never cover a star
       var B = L.starBand, ps = POSTER.scale;
       var hx = rand(B.x0, B.x1), hy = rand(B.y0, B.y1);
@@ -304,7 +351,7 @@
       var ok = true;
       for (var k = 0; k < stars.length; k++) {
         var dx = stars[k].home.x - hx, dy = stars[k].home.y - hy;
-        if (dx * dx + dy * dy < L.starGap * L.starGap) { ok = false; break; }
+        if (dx * dx + dy * dy < gap * gap) { ok = false; break; }
       }
       if (!ok) continue;
       var sc = rand(0.55, 0.95);
@@ -332,13 +379,15 @@
 
     // ---- texts
     var TX = FOCUS_X, T = L.text;
-    var line1 = makeText('The sky has lost its light.\nCan you bring the stars back?', T.q[1], '#fff4e0', true);
+    var line0 = makeText('The more she kept,\nthe darker the sky became.', T.q[1], '#fff4e0', true);
+    line0.x = TX; line0.y = T.q[0]; line0.alpha = 0;
+    var line1 =makeText('The sky has lost its light.\nCan you bring the stars back?', T.q[1], '#fff4e0', true);
     line1.x = TX; line1.y = T.q[0]; line1.alpha = 0;
     var line2 = makeText(opts.hintText || 'Tap the jar to release the stars.', T.hint[1], '#ffd9a0', false);
     line2.x = TX; line2.y = T.hint[0]; line2.alpha = 0;
     var line3 = makeText('Sometimes, true love means\nlearning to let go.', T.end[1], '#fff4e0', true);
     line3.x = TX; line3.y = T.end[0]; line3.alpha = 0;
-    root.addChild(line1, line2, line3);
+    root.addChild(line0, line1, line2, line3);
 
     var replay = new createjs.Container();
     var rpBg = new createjs.Shape();
@@ -385,7 +434,7 @@
 
     // ---- state
     var S = { phase: 'intro', time: 0, t: 0, collected: 0, released: 0, nextIdx: 0,
-              darkness: 0, glowLevel: 0.18 };
+              darkness: 0, glowLevel: 0.18, black: 0, moonDim: 0, moonLight: 0, keptShown: false };
 
     function resetStory() {
       S.phase = 'calm'; S.t = 0; S.collected = 0; S.released = 0; S.nextIdx = 0;
@@ -394,8 +443,11 @@
         s.bmp.scaleX = s.bmp.scaleY = s.scale; s.bmp.alpha = 1;
       });
       fallOrder = stars.slice().sort(function () { return Math.random() - 0.5; });
-      line1.alpha = line2.alpha = line3.alpha = 0;
+      line0.alpha = line1.alpha = line2.alpha = line3.alpha = 0;
       replay.alpha = 0; replay.mouseEnabled = false; hint.alpha = 0;
+      S.keptShown = false;
+      createjs.Tween.removeTweens(lid);
+      lid.alpha = 0; lid.x = LID.x; lid.y = LID.y; lid.rotation = 0;
     }
 
     intro.on('click', function () {
@@ -411,12 +463,16 @@
       createjs.Tween.get(line1, { override: true }).to({ alpha: 0 }, 700);
       createjs.Tween.get(line2, { override: true }).to({ alpha: 0 }, 500);
       createjs.Tween.get(hint, { override: true }).to({ alpha: 0 }, 400);
+      // the lid pops up, tips over and drifts away while the first stars leave
+      createjs.Tween.get(lid, { override: true })
+        .to({ y: LID.y - 150 * POSTER.scale, x: LID.x + 60 * POSTER.scale, rotation: 26 }, 600, createjs.Ease.cubicOut)
+        .to({ y: LID.y - 250 * POSTER.scale, x: LID.x + 140 * POSTER.scale, rotation: 55, alpha: 0 }, 1100, createjs.Ease.sineIn);
       ring(JAR.mouthX, JAR.mouthY);
       burst(JAR.mouthX, JAR.mouthY, 30, 260, dotWarm);
       audio.sfx('release', 0.8);
       var order = stars.slice().sort(function (a, b) { return a.home.y - b.home.y; });
       order.forEach(function (s, i) {
-        s.state = 'rising'; s.t = 0; s.delay = 0.25 + i * TIMING.releaseInterval;
+        s.state = 'rising'; s.t = 0; s.delay = 0.45 + i * TIMING.releaseInterval;
         s.dur = TIMING.riseDur * rand(0.9, 1.15);
         s.p0 = { x: JAR.mouthX + rand(-20, 20), y: JAR.mouthY };
         s.p2 = s.home;
@@ -452,12 +508,25 @@
           s.p1 = { x: s.home.x + (s.p2.x - s.home.x) * 0.35 + rand(-160, 160),
                    y: Math.min(s.home.y, s.p2.y) - rand(60, 220) };
         }
-        if (S.collected >= stars.length) { S.phase = 'dark'; S.t = 0; }
+        // a third of the way in: "The more she kept, the darker the sky became."
+        if (!S.keptShown && S.collected >= Math.ceil(stars.length * 0.35)) {
+          S.keptShown = true;
+          createjs.Tween.get(line0, { override: true }).to({ alpha: 1 }, 1800, createjs.Ease.sineInOut);
+        }
+        if (S.collected >= stars.length) {
+          S.phase = 'dark'; S.t = 0;
+          createjs.Tween.get(line0, { override: true }).wait(300).to({ alpha: 0 }, 1500, createjs.Ease.sineInOut);
+          // she closes the jar: the lid lowers gently into place as the light goes out
+          lid.x = LID.x; lid.y = LID.y - 110 * POSTER.scale; lid.rotation = -6; lid.alpha = 0;
+          createjs.Tween.get(lid, { override: true }).wait(250)
+            .to({ y: LID.y, rotation: 0, alpha: 1 }, 1100, createjs.Ease.sineInOut)
+            .call(function () { audio.chime(0, 0.07); });
+        }
       }
 
       if (S.phase === 'dark' && S.t > TIMING.afterDark) {
         S.phase = 'waitTap'; S.t = 0;
-        createjs.Tween.get(line1, { override: true }).to({ alpha: 1 }, 1400);
+        createjs.Tween.get(line1, { override: true }).to({ alpha: 1 }, 1800, createjs.Ease.sineInOut);
         createjs.Tween.get(line2, { override: true }).wait(TIMING.hintDelay * 1000).to({ alpha: 1 }, 900);
       }
 
@@ -537,9 +606,23 @@
         targetDark = S.collected / stars.length;
         targetGlow = 0.18 + 0.82 * S.collected / stars.length;
       }
-      S.darkness = approach(S.darkness, targetDark, 2.2, dt);
+      S.darkness = approach(S.darkness, targetDark, 1.6, dt);
+      // the moon fades with the sky, then shines again (a little brighter) as the stars return
+      var back = S.phase === 'release' || S.phase === 'endWait' || S.phase === 'end';
+      var targetDim = back ? 1 - S.released / stars.length
+        : (S.phase === 'intro' || S.phase === 'calm') ? 0 : S.collected / stars.length;
+      S.moonDim = approach(S.moonDim, targetDim, 1.2, dt);
+      S.moonLight = approach(S.moonLight, back ? S.released / stars.length : 0, 0.9, dt);
+      if (moonShade) {
+        moonShade.alpha = 0.82 * easeInOut(clamp01(S.moonDim));
+        moonGlow.alpha = 0.42 * easeInOut(clamp01(S.moonLight)) * (1 + 0.1 * Math.sin(S.time * 1.4));
+      }
       S.glowLevel = approach(S.glowLevel, targetGlow, 3, dt);
       dark.alpha = easeInOut(clamp01(S.darkness));
+      // blackout: eases in after the last star lands, lifts after the tap
+      if (S.phase === 'dark' || S.phase === 'waitTap') S.black = Math.min(1, S.black + dt / TIMING.blackIn);
+      else S.black = Math.max(0, S.black - dt / TIMING.blackOut);
+      black.alpha = easeInOut(S.black);
       var gp = 1 + Math.sin(S.time * 2.4) * 0.04 * S.glowLevel;
       glow.alpha = S.glowLevel;
       glow.scaleX = glow.scaleY = (0.55 + 0.45 * S.glowLevel) * gp;
